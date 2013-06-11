@@ -7,6 +7,7 @@
 # [*db_name*]        - name of the mediawiki instance mysql database
 # [*db_user*]        - name of the mysql database user
 # [*db_password*]    - password for the mysql database user
+# [*db_host*]        - host of the db, localhost by default
 # [*ip*]             - ip address of the mediawiki web server
 # [*port*]           - port on mediawiki web server
 # [*server_aliases*] - an array of mediawiki web server aliases
@@ -41,12 +42,13 @@ define mediawiki::instance (
   $db_password,
   $db_name        = $name,
   $db_user        = "${name}_user",
+  $db_host        = 'localhost',
   $ip             = '*',
   $port           = '80',
   $server_aliases = '',
   $ensure         = 'present'
   ) {
-  
+
   validate_re($ensure, '^(present|absent|deleted)$',
   "${ensure} is not supported for ensure.
   Allowed values are 'present', 'absent', and 'deleted'.")
@@ -70,7 +72,7 @@ define mediawiki::instance (
   # mysql_secure_installation)
   case $ensure {
     'present', 'absent': {
-      
+
       exec { "${name}-install_script":
         cwd         => "${mediawiki_install_path}/maintenance",
         command     => "/usr/bin/php install.php ${name} admin    \
@@ -79,7 +81,7 @@ define mediawiki::instance (
                         --server http://${server_name}            \
                         --scriptpath /${name}                     \
                         --dbtype mysql                            \
-                        --dbserver localhost                      \
+                        --dbserver ${db_host}                     \
                         --installdbuser root                      \
                         --installdbpass ${db_root_password}       \
                         --dbname ${db_name}                       \
@@ -88,6 +90,7 @@ define mediawiki::instance (
                         --confpath ${mediawiki_conf_dir}/${name}  \
                         --lang en",
         creates     => "${mediawiki_conf_dir}/${name}/LocalSettings.php",
+        logoutput   => true,
         subscribe   => File["${mediawiki_conf_dir}/${name}/images"],
       }
 
@@ -98,7 +101,7 @@ define mediawiki::instance (
         group  => 'root',
         mode   => '0755',
       }
-        
+
       # MediaWiki instance directory
       file { "${mediawiki_conf_dir}/${name}":
         ensure   => directory,
@@ -107,13 +110,13 @@ define mediawiki::instance (
       # Each instance needs a separate folder to upload images
       file { "${mediawiki_conf_dir}/${name}/images":
         ensure   => directory,
-        group => $::operatingsystem ? {
+        group    => $::operatingsystem ? {
           /(?i)(redhat|centos)/ => 'apache',
           /(?i)(debian|ubuntu)/ => 'www-data',
           default               => undef,
         }
       }
-      
+
       # Ensure that mediawiki configuration files are included in each instance.
       mediawiki::symlinks { $name:
         conf_dir      => $mediawiki_conf_dir,
@@ -127,20 +130,20 @@ define mediawiki::instance (
         target   => "${mediawiki_conf_dir}/${name}",
         require  => File["${mediawiki_conf_dir}/${name}"],
       }
-     
+
       # Each instance has a separate vhost configuration
       apache::vhost { $name:
+        ensure        => $ensure,
         port          => $port,
         docroot       => $doc_root,
         serveradmin   => $admin_email,
         servername    => $server_name,
         vhost_name    => $ip,
-        serveraliases => $server_aliases,
-        ensure        => $ensure,
+        serveraliases => $server_aliases
       }
     }
     'deleted': {
-      
+
       # Remove the MediaWiki instance directory if it is present
       file { "${mediawiki_conf_dir}/${name}":
         ensure  => absent,
@@ -156,18 +159,18 @@ define mediawiki::instance (
       }
 
       mysql::db { $db_name:
+        ensure   => 'absent',
         user     => $db_user,
         password => $db_password,
         host     => 'localhost',
-        grant    => ['all'],
-        ensure   => 'absent',
+        grant    => ['all']
       }
 
       apache::vhost { $name:
-        port          => $port,
-        docroot       => $doc_root,
         ensure        => 'absent',
-      } 
+        port          => $port,
+        docroot       => $doc_root
+      }
     }
   }
 }
